@@ -13,12 +13,16 @@ RUN sed -i '/<Directory \/var\/www\/>/,/<\/Directory>/ s/AllowOverride None/Allo
 
 # Serve the public front controller instead of exposing project internals
 COPY docker/000-default.conf /etc/apache2/sites-available/000-default.conf
+COPY docker/start-apache.sh /usr/local/bin/start-apache.sh
 
 # Copy app files
 COPY . /var/www/html/
 
 # Fix permissions
 RUN chown -R www-data:www-data /var/www/html \
-    && chmod -R 755 /var/www/html
+    && chmod -R 755 /var/www/html \
+    && chmod +x /usr/local/bin/start-apache.sh
 
-EXPOSE 80
+CMD ["/usr/local/bin/start-apache.sh"]
+
+EXPOSE 10000
