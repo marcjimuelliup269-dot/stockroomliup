@@ -140,9 +140,8 @@ $config['users_table'] = 'users';
 | Access-Control-Allow-Origin
 |--------------------------------------------------------------------------
 |
-| Access-Control-Allow-Origin - change this to your domain if
-| already deployed. '*' allows any website to call your API from
-| a browser, so set your real domain in production.
+| Set one exact origin or a comma-separated list of exact origins in
+| production. '*' allows any website to call your API from a browser.
 |
 */
 $config['allow_origin'] = getenv('API_ALLOW_ORIGIN') ?: '*';

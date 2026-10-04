@@ -6,11 +6,12 @@ if (!function_exists('handle_cors')) {
     {
         $configured_origin = (string) config_item('allow_origin');
         $request_origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+        $allowed_origins = array_map('trim', explode(',', $configured_origin));
 
-        if ($configured_origin === '*') {
+        if (in_array('*', $allowed_origins, true)) {
             header('Access-Control-Allow-Origin: *');
-        } elseif ($request_origin !== '' && hash_equals($configured_origin, $request_origin)) {
-            header('Access-Control-Allow-Origin: ' . $configured_origin);
+        } elseif ($request_origin !== '' && in_array($request_origin, $allowed_origins, true)) {
+            header('Access-Control-Allow-Origin: ' . $request_origin);
             header('Vary: Origin');
         }
 
