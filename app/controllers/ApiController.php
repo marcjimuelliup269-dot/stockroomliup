@@ -22,6 +22,13 @@ class ApiController extends Controller
         http_response_code(204);
     }
 
+    public function create()
+    {
+        $client_ip = $_SERVER['REMOTE_ADDR'] ?? 'unknown';
+        $this->api->rate_limit('api_create:' . $client_ip, 5, 300);
+        $this->register();
+    }
+
     public function login()
     {
         $input = $this->request_data();
@@ -55,6 +62,7 @@ class ApiController extends Controller
         $email = trim((string)($input['email'] ?? ''));
         $password = (string)($input['password'] ?? '');
         $password_confirmation = (string)($input['password_confirmation'] ?? '');
+        $role = trim((string)($input['role'] ?? 'user'));
 
         if ($username === '' || strlen($username) > 100) {
             $this->api->respond_error('Username is required and must be 100 characters or fewer.', 422);
@@ -65,8 +73,20 @@ class ApiController extends Controller
         if (strlen($password) < 8) {
             $this->api->respond_error('Password must be at least 8 characters.', 422);
         }
-        if ($password !== $password_confirmation) {
+        if ($password_confirmation !== '' && $password !== $password_confirmation) {
             $this->api->respond_error('Passwords do not match.', 422);
+        }
+        if (!in_array($role, ['admin', 'moderator', 'user'], true)) {
+            $this->api->respond_error('Invalid user role.', 422);
+        }
+        if ($role !== 'user') {
+            $admin = $this->db->raw("SELECT id FROM users WHERE role = 'admin' LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+            if ($admin || $role !== 'admin') {
+                $actor = $this->api->require_jwt();
+                if (($actor['role'] ?? '') !== 'admin') {
+                    $this->api->respond_error('Only admins can assign privileged roles.', 403);
+                }
+            }
         }
 
         $existing = $this->db->raw(
@@ -80,7 +100,7 @@ class ApiController extends Controller
 
         $this->db->raw(
             'INSERT INTO users (username, email, password, role, is_active) VALUES (?, ?, ?, ?, ?)',
-            [$username, $email, password_hash($password, PASSWORD_DEFAULT), 'user', 1]
+            [$username, $email, password_hash($password, PASSWORD_DEFAULT), $role, 1]
         );
         http_response_code(201);
         $this->api->respond(['message' => 'Account created. You can now sign in.']);
@@ -106,6 +126,118 @@ class ApiController extends Controller
         }
 
         $this->api->respond(['message' => 'Signed out.']);
+    }
+
+    public function profile()
+    {
+        $identity = $this->api->require_jwt();
+        $user = $this->find_user((int)$identity['sub']);
+        if (!$user) {
+            $this->api->respond_error('User not found.', 404);
+        }
+
+        $this->api->respond(['user' => $user]);
+    }
+
+    public function list_users()
+    {
+        $this->api->require_jwt();
+        $statement = $this->db->raw(
+            'SELECT id, username, email, role, created_at, updated_at FROM users ORDER BY id ASC'
+        );
+        $this->api->respond(['data' => $statement->fetchAll(PDO::FETCH_ASSOC)]);
+    }
+
+    public function update_user($id)
+    {
+        $identity = $this->api->require_jwt();
+        $id = (int)$id;
+        $is_admin = ($identity['role'] ?? '') === 'admin';
+        if (!$is_admin && (int)$identity['sub'] !== $id) {
+            $this->api->respond_error('You can only update your own profile.', 403);
+        }
+
+        $current = $this->find_user($id);
+        if (!$current) {
+            $this->api->respond_error('User not found.', 404);
+        }
+
+        $input = $this->request_data();
+        $username = array_key_exists('username', $input) ? trim((string)$input['username']) : null;
+        $email = array_key_exists('email', $input) ? trim((string)$input['email']) : null;
+        $role = array_key_exists('role', $input) ? trim((string)$input['role']) : null;
+        if ($username === null && $email === null) {
+            $this->api->respond_error('Provide at least a username or email.', 422);
+        }
+        if ($username !== null && ($username === '' || strlen($username) > 100)) {
+            $this->api->respond_error('Username is required and must be 100 characters or fewer.', 422);
+        }
+        if ($email !== null && (!filter_var($email, FILTER_VALIDATE_EMAIL) || strlen($email) > 255)) {
+            $this->api->respond_error('Enter a valid email address.', 422);
+        }
+        if ($role !== null) {
+            if (!$is_admin) {
+                $this->api->respond_error('Only admins can change user roles.', 403);
+            }
+            if (!in_array($role, ['admin', 'moderator', 'user'], true)) {
+                $this->api->respond_error('Invalid user role.', 422);
+            }
+        }
+
+        $updates = [];
+        $values = [];
+        if ($username !== null) {
+            $duplicate = $this->db->raw(
+                'SELECT id FROM users WHERE username = ? AND id <> ? LIMIT 1',
+                [$username, $id]
+            )->fetch(PDO::FETCH_ASSOC);
+            if ($duplicate) {
+                $this->api->respond_error('That username is already registered.', 409);
+            }
+            $updates[] = 'username = ?';
+            $values[] = $username;
+        }
+        if ($email !== null) {
+            $duplicate = $this->db->raw(
+                'SELECT id FROM users WHERE email = ? AND id <> ? LIMIT 1',
+                [$email, $id]
+            )->fetch(PDO::FETCH_ASSOC);
+            if ($duplicate) {
+                $this->api->respond_error('That email is already registered.', 409);
+            }
+            $updates[] = 'email = ?';
+            $values[] = $email;
+        }
+        if ($role !== null) {
+            $updates[] = 'role = ?';
+            $values[] = $role;
+        }
+
+        $values[] = $id;
+        $this->db->raw(
+            'UPDATE users SET ' . implode(', ', $updates) . ', updated_at = CURRENT_TIMESTAMP WHERE id = ?',
+            $values
+        );
+        $this->api->respond(['user' => $this->find_user($id)]);
+    }
+
+    public function delete_user($id)
+    {
+        $identity = $this->api->require_jwt();
+        $id = (int)$id;
+        if ((int)$identity['sub'] === $id) {
+            $this->api->respond_error('You cannot delete yourself.', 422);
+        }
+        if (($identity['role'] ?? '') !== 'admin') {
+            $this->api->respond_error('Only admins can delete users.', 403);
+        }
+        if (!$this->find_user($id)) {
+            $this->api->respond_error('User not found.', 404);
+        }
+
+        $this->db->raw('DELETE FROM refresh_tokens WHERE user_id = ?', [$id]);
+        $this->db->raw('DELETE FROM users WHERE id = ?', [$id]);
+        $this->api->respond(['message' => 'User deleted.']);
     }
 
     public function index()
@@ -213,6 +345,15 @@ class ApiController extends Controller
     {
         $statement = $this->db->raw(
             'SELECT id, product_name, description, price, quantity, created_at FROM products WHERE id = ? LIMIT 1',
+            [(int)$id]
+        );
+        return $statement->fetch(PDO::FETCH_ASSOC);
+    }
+
+    private function find_user($id)
+    {
+        $statement = $this->db->raw(
+            'SELECT id, username, email, role, created_at, updated_at FROM users WHERE id = ? LIMIT 1',
             [(int)$id]
         );
         return $statement->fetch(PDO::FETCH_ASSOC);

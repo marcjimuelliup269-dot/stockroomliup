@@ -75,17 +75,27 @@ if (defined('IS_CLI') && IS_CLI) {
 }
 
 $router->post('/api/login', 'ApiController@login');
+$router->post('/api/create', 'ApiController@create');
 $router->post('/api/register', 'ApiController@register');
 $router->post('/api/refresh', 'ApiController@refresh');
 $router->post('/api/logout', 'ApiController@logout');
+$router->get('/api/profile', 'ApiController@profile');
+$router->get('/api/list', 'ApiController@list_users');
+$router->put('/api/update/{id}', 'ApiController@update_user');
+$router->delete('/api/delete/{id}', 'ApiController@delete_user');
 $router->get('/api/products', 'ApiController@index');
 $router->post('/api/products', 'ApiController@store');
 $router->put('/api/products/{id}', 'ApiController@update');
 $router->patch('/api/products/{id}', 'ApiController@update');
 $router->delete('/api/products/{id}', 'ApiController@delete');
 $router->options('/api/login', 'ApiController@options');
+$router->options('/api/create', 'ApiController@options');
 $router->options('/api/register', 'ApiController@options');
 $router->options('/api/refresh', 'ApiController@options');
 $router->options('/api/logout', 'ApiController@options');
+$router->options('/api/profile', 'ApiController@options');
+$router->options('/api/list', 'ApiController@options');
+$router->options('/api/update/{id}', 'ApiController@options');
+$router->options('/api/delete/{id}', 'ApiController@options');
 $router->options('/api/products', 'ApiController@options');
 $router->options('/api/products/{id}', 'ApiController@options');
